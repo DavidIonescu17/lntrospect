@@ -111,7 +111,6 @@ export default function JournalScreen({ date, user, openFormInitially }: Journal
       setEncryptionKey(key);
       })();
     }, []);
-console.log('Current encryptionKey:', encryptionKey);
 
   const decryptData = (encryptedData) => {
     if (!encryptionKey) return null;
@@ -123,7 +122,6 @@ console.log('Current encryptionKey:', encryptionKey);
       return null;
     }
   };
-console.log('Current encryptionKey:', encryptionKey);
 
   const encryptData = (data) => {
     if (!encryptionKey) return null;
