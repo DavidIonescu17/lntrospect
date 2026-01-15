@@ -3,6 +3,26 @@ import { StyleSheet, Dimensions } from 'react-native';
 const { width: screenWidth } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
+  signOutButton: {
+    backgroundColor: '#FFF5F5', // Very light red
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 15,
+    marginTop: 10,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FED7D7', // Soft red border
+  },
+  signOutButtonText: {
+    color: '#E53E3E', // Strong red text
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 10,
+    fontFamily: 'System',
+  },
+  
   container: {
     flex: 1,
     backgroundColor: '#F8F8F8', // Light background

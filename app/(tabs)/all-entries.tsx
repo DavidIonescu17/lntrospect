@@ -1,11 +1,11 @@
-import styles from '../styles/all-entries.styles'; // Reusing styles from specific-day for consistency
+import styles from '../styles/all-entries.styles'; 
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  ScrollView, // Not strictly needed if using FlatList, but kept for context
-  Image, // Not directly used in this view, but kept for context
+  ScrollView, 
+  Image, 
   Alert,
   SafeAreaView,
   FlatList,
@@ -26,9 +26,9 @@ import CryptoJS from 'crypto-js';
 import { db } from '../../firebaseConfig';
 import { useRouter, Stack } from 'expo-router';
 import { getAuth } from 'firebase/auth';
-import { LinearGradient } from 'expo-linear-gradient'; // Import LinearGradient for a nicer header
+import { LinearGradient } from 'expo-linear-gradient'; 
 
-import { getEncryptionKey } from '../utils/encryption'; // update path as needed
+import { getEncryptionKey } from '../utils/encryption'; 
 
 const MOODS = {
   veryHappy: {
@@ -116,20 +116,17 @@ export default function AllEntries() {
   }, []);
 
   const decryptData = (encryptedData) => {
-  if (!encryptionKey) return null;
-  try {
-    const bytes = CryptoJS.AES.decrypt(encryptedData, encryptionKey);
-    const result = bytes.toString(CryptoJS.enc.Utf8);
-    console.log('Decrypted string:', result); // Add this
-    if (result) return JSON.parse(result);
-  } catch (e) {
-    console.log('Decryption error:', e);
-  }
-  return null;
-};
+    if (!encryptionKey) return null;
+    try {
+      const bytes = CryptoJS.AES.decrypt(encryptedData, encryptionKey);
+      const result = bytes.toString(CryptoJS.enc.Utf8);
+      if (result) return JSON.parse(result);
+    } catch (e) {
+      console.log('Decryption error:', e);
+    }
+    return null;
+  };
 
-
-  
   const loadAllEntries = async () => {
     if (!user || !encryptionKey) {
       setLoading(false);
@@ -155,7 +152,9 @@ export default function AllEntries() {
           loadedEntries.push({
             id: doc.id,
             ...decryptedData,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
+            // 1. CAPTURE SHARING STATUS (Default to false if missing)
+            isShared: data.isShared || false 
           });
         }
       });
@@ -175,6 +174,30 @@ export default function AllEntries() {
     }
   }, [encryptionKey, user]);
 
+  // 2. NEW FUNCTION: Toggle Sharing Status
+  const toggleShare = async (entryId, currentStatus) => {
+    try {
+      // A. Optimistic Update (Change UI immediately)
+      setEntries(prevEntries => 
+        prevEntries.map(entry => 
+          entry.id === entryId ? { ...entry, isShared: !currentStatus } : entry
+        )
+      );
+
+      // B. Update Firestore
+      const entryRef = doc(db, 'journal_entries', entryId);
+      await updateDoc(entryRef, {
+        isShared: !currentStatus
+      });
+
+    } catch (error) {
+      console.error("Error toggling share:", error);
+      Alert.alert("Error", "Could not update sharing status");
+      // Revert if failed
+      loadAllEntries(); 
+    }
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -190,7 +213,7 @@ export default function AllEntries() {
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
-      hour12: true // Ensure AM/PM format
+      hour12: true 
     });
   };
 
@@ -199,8 +222,6 @@ export default function AllEntries() {
       key={entry.id}
       style={styles.entryCard}
       onPress={() => {
-        // Navigate to the specific day page with the entry's date
-        // and optionally pass the entry ID if you want to highlight it
         router.push({
           pathname: '/specific-day',
           params: { date: new Date(entry.date).toISOString().split('T')[0] }
@@ -209,12 +230,42 @@ export default function AllEntries() {
       activeOpacity={0.8}
     >
       <View style={styles.entryCardHeader}>
-        <Text style={styles.entryCardDate}>
-          {formatDate(entry.date)}
-        </Text>
-        <Text style={styles.entryCardTime}>
-          {formatTime(entry.createdAt)}
-        </Text>
+        <View>
+            <Text style={styles.entryCardDate}>
+            {formatDate(entry.date)}
+            </Text>
+            <Text style={styles.entryCardTime}>
+            {formatTime(entry.createdAt)}
+            </Text>
+        </View>
+
+        {/* 3. NEW: Share Toggle Button */}
+        <TouchableOpacity 
+            onPress={() => toggleShare(entry.id, entry.isShared)}
+            style={{ 
+                flexDirection: 'row', 
+                alignItems: 'center', 
+                backgroundColor: entry.isShared ? '#F3F0FF' : 'transparent',
+                padding: 6,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: entry.isShared ? '#D6BCFA' : 'transparent'
+            }}
+        >
+            <Text style={{ 
+                fontSize: 10, 
+                color: entry.isShared ? '#6B4EFF' : '#A0AEC0', 
+                marginRight: 4, 
+                fontWeight: 'bold' 
+            }}>
+                {entry.isShared ? 'SHARED' : 'PRIVATE'}
+            </Text>
+            <MaterialCommunityIcons 
+                name={entry.isShared ? "eye" : "eye-off-outline"} 
+                size={20} 
+                color={entry.isShared ? "#6B4EFF" : "#A0AEC0"} 
+            />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.entryCardBody}>
@@ -250,7 +301,7 @@ export default function AllEntries() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <LinearGradient
-        colors={['#6B4EFF', '#8A4FFF', '#A855F7']} // Gradient similar to your TabOneScreen hero
+        colors={['#6B4EFF', '#8A4FFF', '#A855F7']} 
         style={styles.headerGradient}
       >
         <View style={styles.headerContainer}>
@@ -294,7 +345,7 @@ export default function AllEntries() {
           data={entries}
           renderItem={renderEntry}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.entriesListContainer} // Changed from entriesContainer for clarity
+          contentContainerStyle={styles.entriesListContainer} 
           showsVerticalScrollIndicator={false}
         />
       )}

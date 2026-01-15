@@ -50,7 +50,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Calendar',
-          tabBarIcon: ({ color }) => <TabBarIcon name="calendar" color={color} />,
+          tabBarIcon: ({ color }) => <TabBarIcon name="calendar" color="#3182CE" />,
           headerRight: () => (
             <Link href="/modal" asChild>
               <Pressable>
@@ -79,15 +79,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="assistant"
         options={{
-          title: 'Assistant',
-          tabBarIcon: ({ color }) => <TabBarIcon name="android" color={color} />,
+          title: 'Therapy',
+          tabBarIcon: ({ color }) => <TabBarIcon name="heartbeat" color="#6B4EFF" />,
         }}
       />
       <Tabs.Screen
         name="therapists"
         options={{
           title: 'Therapists',
-          tabBarIcon: ({ color }) => <TabBarIcon name="user-md" color={color} />, 
+          tabBarIcon: ({ color }) => <TabBarIcon name="user-md" color="#319795" />, 
         }}
       />
       <Tabs.Screen
@@ -105,7 +105,7 @@ export default function TabLayout() {
         options={{
           title: 'Insights',
            headerShown: false,
-          tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart" color={color} />, 
+          tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart" color="#DD6B20" />, 
         }}
       />
       <Tabs.Screen
@@ -114,17 +114,19 @@ export default function TabLayout() {
           title: 'Specific-Day',
            headerShown: false,
            href: null,
-          tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />, 
+          tabBarIcon: ({ color }) => <TabBarIcon name="user" color="#6B4EFF"/>, 
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <TabBarIcon name="user" color={color} />, 
+          tabBarIcon: ({ color }) => <TabBarIcon name="user" color="#6B4EFF" />, 
         }}
       />
     
     </Tabs>
   );
 }
+
+

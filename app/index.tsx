@@ -4,8 +4,7 @@ import { auth } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useRouter } from 'expo-router';
 import { NavigationContainer } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
+import { getFirestore, doc, getDoc } from 'firebase/firestore';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -13,14 +12,29 @@ const Login = () => {
   const router = useRouter();
 
   const signIn = async () => {
-    try {
-      const user = await signInWithEmailAndPassword(auth, email, password);
-      if (user) router.replace('/(tabs)');
-    } catch (error: any) {
-      console.log(error);
-      alert('Sign in failed: ' + error.message);
+  const db = getFirestore();
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // Fetch user role from Firestore
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      if (userData.role === 'Psychologist') {
+        router.replace('/psychologist-dashboard');
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else {
+      alert("User data not found.");
     }
-  };
+  } catch (error: any) {
+    console.log(error);
+    alert('Sign in failed: ' + error.message);
+  }
+};
 
   return (
     <NavigationContainer>

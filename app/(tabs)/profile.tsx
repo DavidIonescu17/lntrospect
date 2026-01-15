@@ -1,5 +1,6 @@
+import { signOut } from 'firebase/auth';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { router } from 'expo-router';
+import { router, useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -10,7 +11,7 @@ import {
   Modal,
 } from 'react-native';
 import { PieChart } from 'react-native-chart-kit';
-import { onSnapshot } from 'firebase/firestore';
+import { onSnapshot, terminate } from 'firebase/firestore';
 
 import {
   getFirestore,
@@ -227,11 +228,63 @@ const MoodProfileDashboard = ({ navigation }) => {
   const [chartViewMode, setChartViewMode] = useState('pieChart'); // 'pieChart' or 'breakdown'
   const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
   const [isEncryptionKeyLoaded, setIsEncryptionKeyLoaded] = useState(false);
-
-
+  const router = useRouter();
+  const unsubscribeRef = React.useRef<(() => void) | null>(null);
+  
   const auth = getAuth();
   const user = auth.currentUser;
   const userId = user ? user.uid : null;
+
+  useEffect(() => {
+  if (!userId || !isEncryptionKeyLoaded || !encryptionKey) return;
+
+  const q = query(
+    collection(db, 'journal_entries'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+
+  // Save the unsubscribe function to our ref
+  const unsub = onSnapshot(q, (querySnapshot) => {
+    // ... your existing logic to process entries ...
+  });
+
+  unsubscribeRef.current = unsub;
+
+  return () => {
+      if (unsub) unsub(); // Cleanup on component unmount
+    };
+  }, [userId, isEncryptionKeyLoaded, encryptionKey]);
+
+  const handleSignOut = async () => {
+    // 1. Get DB instance
+    const db = getFirestore();
+    const auth = getAuth();
+
+    try {
+        // 2. Kill the listeners (Ignore errors here)
+        await terminate(db).catch(() => console.log("DB already terminated"));
+        
+        // 3. Sign Out from Firebase
+        await signOut(auth);
+
+        console.log("Sign out successful, navigating...");
+
+        // 4. Force Navigation to Login
+        // We use a small timeout to let the Auth state settle
+        setTimeout(() => {
+            if (router.canDismiss()) {
+                router.dismissAll(); // Clear the stack (back history)
+            }
+            router.replace("/"); // Go to app/index.tsx
+        }, 100);
+
+    } catch (error: any) {
+        console.error("Sign out error:", error);
+        // Even if Firebase fails, force the user to the login screen
+        router.replace("/");
+    }
+};
   
   useEffect(() => {
     const loadKey = async () => {
@@ -419,7 +472,6 @@ const MoodProfileDashboard = ({ navigation }) => {
     if (userId) {
       loadUserProfile();
     } else {
-      setMoodData(generateMockData()); // Assuming generateMockData is defined elsewhere
       setLoading(false);
       setUserName('Guest User');
       setUserAvatar('👤');
@@ -1138,6 +1190,16 @@ const MoodProfileDashboard = ({ navigation }) => {
            <Text style={styles.viewAllInsightsButtonText}>View All Trends & Insights →</Text>
          </TouchableOpacity>
       </View>
+
+      <TouchableOpacity 
+        style={styles.signOutButton} 
+        onPress={handleSignOut}
+      >
+        <MaterialCommunityIcons name="logout" size={20} color="#E53E3E" />
+        <Text style={styles.signOutButtonText}>Sign Out</Text>
+      </TouchableOpacity>
+
+      <View style={{ height: 100 }} />
 
       {/* Master Habits Modal */}
       {showMasterHabitsModal && (

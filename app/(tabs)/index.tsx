@@ -1,17 +1,28 @@
 import styles from '../styles/index.styles';
 import React, { useState, useEffect, useCallback } from 'react';
-import { TouchableOpacity, Text, ScrollView, Image, View, Dimensions, Alert } from 'react-native';
+import { 
+  TouchableOpacity, 
+  Text, 
+  ScrollView, 
+  Image, 
+  View, 
+  Dimensions, 
+  Alert, 
+  Modal, 
+  Linking, 
+  Vibration,
+  StyleSheet 
+} from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { auth } from '../../firebaseConfig';
 import { getAuth } from 'firebase/auth';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  getFirestore,
   collection,
   getDocs,
   query,
   where,
-  orderBy
+  orderBy,
 } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import CryptoJS from 'crypto-js';
@@ -35,27 +46,37 @@ const MOODS = {
 
 const { width } = Dimensions.get('window');
 
+// --- CRISIS MODULE CONSTANTS ---
+const EMERGENCY_NUMBERS = [
+  { name: 'Emergency (112)', number: '112', icon: 'ambulance' },
+  { name: 'Anti-Suicide Alliance', number: '0800 801 200', icon: 'lifebuoy' },
+  { name: 'Domestic Violence', number: '0800 500 333', icon: 'home-alert' },
+  { name: 'DepreHUB', number: '0726 666 266', icon: 'headset' },
+];
+
 export default function TabOneScreen() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [moodData, setMoodData] = useState<{ [date: string]: string[] }>({});
   const [dailyHabitStats, setDailyHabitStats] = useState<{ [date: string]: { completed: number, total: number } }>({});
   const [loading, setLoading] = useState(true);
   const [isHabitView, setIsHabitView] = useState(false);
-  const [encryptionKey, setEncryptionKey] = useState<string | null>(null); // Type as string | null
-  const [isEncryptionKeyLoaded, setIsEncryptionKeyLoaded] = useState(false); // New state to track key loading
+  const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
+  const [isEncryptionKeyLoaded, setIsEncryptionKeyLoaded] = useState(false);
+  
+  // --- PANIC MODE STATE ---
+  const [panicModalVisible, setPanicModalVisible] = useState(false);
+
   const user = getAuth().currentUser;
 
-  // Effect to load encryption key
   useEffect(() => {
     const loadKey = async () => {
       const key = await getEncryptionKey();
       setEncryptionKey(key);
-      setIsEncryptionKeyLoaded(true); // Set flag when key is loaded
+      setIsEncryptionKeyLoaded(true);
     };
     loadKey();
-  }, []); // Run only once on mount
+  }, []);
 
-  // Use useEffect for initial auth state observation
   useEffect(() => {
     const unsubscribe = getAuth().onAuthStateChanged((user) => {
       if (!user) router.replace('/');
@@ -63,34 +84,49 @@ export default function TabOneScreen() {
     return () => unsubscribe();
   }, []);
 
-  // Use useFocusEffect to re-fetch data whenever the screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      // Only load data if user is present AND encryption key is loaded
       if (user && isEncryptionKeyLoaded) {
         loadMoodData();
         fetchDailyHabitStats();
       }
-    }, [user, isEncryptionKeyLoaded]) // Depend on isEncryptionKeyLoaded
+    }, [user, isEncryptionKeyLoaded])
   );
 
-  const decryptData = (encryptedData: string | undefined | null) => { // Added type for clarity
-    // Explicitly check if encryptedData is a string and of sufficient length
+  // --- PANIC BUTTON LOGIC (FR-19 to FR-22) ---
+  const handlePanicLongPress = () => {
+    Vibration.vibrate(100); // Haptic feedback confirmation
+    setPanicModalVisible(true);
+  };
+
+  const handleCall = (number: string) => {
+    Linking.openURL(`tel:${number}`);
+  };
+
+  const handleSafeCircleAlert = () => {
+    // FR-21: In a real app, this would use SMS API or Push Notifications to specific contacts.
+    // Here we open the SMS app pre-filled.
+    const message = "I am having a crisis and need support. Please contact me.";
+    Linking.openURL(`sms:?body=${message}`);
+  };
+
+  const handlePanicPressShort = () => {
+    // FR-20: Prevent accidental activation
+    Alert.alert("Hold to Activate", "Please long-press the SOS button for 2 seconds to activate Emergency Mode.");
+  };
+
+  const decryptData = (encryptedData: string | undefined | null) => {
     if (!encryptionKey || typeof encryptedData !== 'string' || encryptedData.length < 8) {
-      console.log('Skipping decryption: Invalid key, or encryptedData not a string or too short.');
       return null;
     }
     try {
       const bytes = CryptoJS.AES.decrypt(encryptedData, encryptionKey);
       const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
       
-      if (!decryptedString) {
-        console.error('Decryption yielded an empty string. Likely decryption failed due to incorrect key or corrupted data.');
-        return null;
-      }
+      if (!decryptedString) return null;
       return JSON.parse(decryptedString);
     } catch (error) {
-      console.error('Decryption or JSON parsing error:', error);
+      console.error('Decryption error:', error);
       return null;
     }
   };
@@ -107,7 +143,7 @@ export default function TabOneScreen() {
   };
 
   const fetchDailyHabitStats = async () => {
-    if (!user) return; // This check is sufficient given useFocusEffect dependency
+    if (!user) return;
 
     try {
       const todayKey = formatLocalYYYYMMDD(new Date());
@@ -139,8 +175,6 @@ export default function TabOneScreen() {
   };
 
   const loadMoodData = async () => {
-    // This check is redundant if the useCallback depends on isEncryptionKeyLoaded,
-    // but it's good for safety if loadMoodData is called elsewhere.
     if (!user || !isEncryptionKeyLoaded || !encryptionKey) return;
 
     try {
@@ -152,15 +186,13 @@ export default function TabOneScreen() {
       );
 
       const querySnapshot = await getDocs(q);
-      const moodByDate: { [date: string]: string[] } = {}; // Explicitly typed
+      const moodByDate: { [date: string]: string[] } = {};
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        // Use || to try both fields for backwards compatibility if needed
         const encryptedDataFromFirestore = data.encryptedContent || data.cryptedContent;
         const decryptedData = decryptData(encryptedDataFromFirestore);
 
-        // Robust check: Ensure decryptedData is an object and has a 'mood' property
         if (decryptedData && typeof decryptedData === 'object' && decryptedData.mood) {
           const entryDate = new Date(decryptedData.date).toISOString().split('T')[0];
 
@@ -168,9 +200,6 @@ export default function TabOneScreen() {
             moodByDate[entryDate] = [];
           }
           moodByDate[entryDate].push(decryptedData.mood);
-        } else {
-          // Log a warning for entries that could not be decrypted or had missing mood
-          console.warn('Skipping entry due to invalid decrypted data or missing mood:', decryptedData, 'from document ID:', doc.id);
         }
       });
 
@@ -187,11 +216,7 @@ export default function TabOneScreen() {
     const todayDateString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     if (day.dateString > todayDateString) {
-      Alert.alert(
-        'Future Date',
-        'You cannot view future dates. Focus on today!',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Future Date', 'You cannot view future dates.', [{ text: 'OK' }]);
       return;
     }
 
@@ -224,46 +249,30 @@ export default function TabOneScreen() {
         const stats = dailyHabitStats[date];
         if (stats) {
           if (date === todayDate) {
-            marked[date] = {
-              ...marked[date],
-              habitStats: stats,
-            };
+            marked[date] = { ...marked[date], habitStats: stats };
           } else {
             marked[date] = {
               habitStats: stats,
               customStyles: {
-                container: {
-                  backgroundColor: 'white',
-                  borderRadius: 16,
-                },
-                text: {
-                  color: '#2d3436',
-                }
+                container: { backgroundColor: 'white', borderRadius: 16 },
+                text: { color: '#2d3436' }
               }
             };
           }
         }
       });
-    } else { // Moods view
+    } else {
       Object.keys(moodData).forEach(date => {
         const moodsForDay = moodData[date];
         if (moodsForDay && moodsForDay.length > 0) {
           if (date === todayDate) {
-            marked[date] = {
-              ...marked[date],
-              moods: moodsForDay,
-            };
+            marked[date] = { ...marked[date], moods: moodsForDay };
           } else {
             marked[date] = {
               moods: moodsForDay,
               customStyles: {
-                container: {
-                  backgroundColor: 'white',
-                  borderRadius: 16,
-                },
-                text: {
-                  color: '#2d3436',
-                }
+                container: { backgroundColor: 'white', borderRadius: 16 },
+                text: { color: '#2d3436' }
               }
             };
           }
@@ -273,43 +282,7 @@ export default function TabOneScreen() {
     return marked;
   }, [isHabitView, moodData, dailyHabitStats]);
 
-  const getStreakCount = () => {
-    const today = new Date();
-    let streak = 0;
-
-    for (let i = 0; i < 30; i++) {
-      const checkDate = new Date(today);
-      checkDate.setDate(today.getDate() - i);
-      const dateString = checkDate.toISOString().split('T')[0];
-
-      if (moodData[dateString] && moodData[dateString].length > 0) {
-        streak++;
-      } else {
-        break;
-      }
-    }
-    return streak;
-  };
-
-  const getMoodStats = () => {
-    const allMoods = Object.values(moodData).flat();
-    const moodCounts: { [key: string]: number } = {}; // Explicitly type moodCounts
-
-    allMoods.forEach(mood => {
-      moodCounts[mood] = (moodCounts[mood] || 0) + 1;
-    });
-
-    const topMood = Object.keys(moodCounts).reduce((a, b) =>
-      moodCounts[a] > moodCounts[b] ? a : b, 'neutral'
-    );
-
-    return { topMood, totalEntries: allMoods.length };
-  };
-
-  const stats = getMoodStats();
-  const streak = getStreakCount();
-
-  const CustomDayWithMultiMoods = ({ date, state, marking, onPress }: any) => { // Use 'any' for marking due to complex type
+  const CustomDayWithMultiMoods = ({ date, state, marking, onPress }: any) => {
     const isSelected = marking?.selected;
     const moodsForDay = marking?.moods || [];
     const habitStatsForDay = marking?.habitStats;
@@ -366,112 +339,323 @@ export default function TabOneScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Hero Section */}
-      <View style={styles.heroSection}>
-        <View style={styles.heroContent}>
-          <Image
-            source={require('../../assets/images/logo2.png')}
-            style={styles.logo}
-          />
-          <Text style={styles.heroTitle}>Welcome to your Journey of self-discovery</Text>
-        </View>
-      </View>
+    <View style={{flex: 1}}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Hero Section */}
+        <View style={styles.heroSection}>
+          {/* FR-19: Persistent Panic Button */}
+          <View style={localStyles.panicButtonContainer}>
+            <TouchableOpacity 
+              style={localStyles.panicButton}
+              onLongPress={handlePanicLongPress} // FR-20: Long press required
+              onPress={handlePanicPressShort} // Warning for short press
+              delayLongPress={1500}
+              activeOpacity={0.8}
+            >
+              <Text style={localStyles.panicButtonText}>SOS</Text>
+            </TouchableOpacity>
+          </View>
 
-      {/* Calendar Section */}
-      <View style={styles.calendarSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionSubtitle}>Tap any day to explore your memories</Text>
-          {/* Toggle Button */}
-          <TouchableOpacity
-            style={styles.toggleViewButton}
-            onPress={() => setIsHabitView(!isHabitView)}
-          >
-            <MaterialCommunityIcons
-              name={isHabitView ? "emoticon-outline" : "check-all"}
-              size={20}
-              color="#6B4EFF"
+          <View style={styles.heroContent}>
+            <Image
+              source={require('../../assets/images/logo2.png')}
+              style={styles.logo}
             />
-            <Text style={styles.toggleViewButtonText}>
-              {isHabitView ? "Show Moods" : "Show Habits"}
-            </Text>
+            <Text style={styles.heroTitle}>Welcome to your Journey of self-discovery</Text>
+          </View>
+        </View>
+
+        {/* Calendar Section */}
+        <View style={styles.calendarSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionSubtitle}>Tap any day to explore your memories</Text>
+            <TouchableOpacity
+              style={styles.toggleViewButton}
+              onPress={() => setIsHabitView(!isHabitView)}
+            >
+              <MaterialCommunityIcons
+                name={isHabitView ? "emoticon-outline" : "check-all"}
+                size={20}
+                color="#6B4EFF"
+              />
+              <Text style={styles.toggleViewButtonText}>
+                {isHabitView ? "Show Moods" : "Show Habits"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.calendarContainer}>
+             <Calendar
+              onDayPress={handleDayPress}
+              style={styles.calendar}
+              markingType="custom"
+              markedDates={getMarkedDates()}
+              dayComponent={CustomDayWithMultiMoods}
+              theme={{
+                textDayFontFamily: 'System',
+                textMonthFontFamily: 'System',
+                textDayHeaderFontFamily: 'System',
+                textDayFontWeight: '400',
+                textMonthFontWeight: '600',
+                textDayHeaderFontWeight: '600',
+                textDayFontSize: 16,
+                textMonthFontSize: 18,
+                textDayHeaderFontSize: 14
+              }}
+            />
+
+            {!isHabitView && (
+              <View style={styles.legend}>
+                <Text style={styles.legendTitle}>Mood Legend</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.legendScrollViewContent}>
+                  {Object.entries(MOODS).map(([key, mood]) => (
+                    <View key={key} style={styles.legendItem}>
+                      <MaterialCommunityIcons
+                        name={mood.icon}
+                        size={20}
+                        color={mood.color}
+                        style={styles.legendIcon}
+                      />
+                      <Text style={styles.legendText}>{mood.label}</Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Quick Actions */}
+        <View style={styles.quickActions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push({
+              pathname: '/specific-day',
+              params: {
+                date: getTodayDate(),
+                initialTab: 'journal',
+                openForm: 'true'
+              }
+            })}
+          >
+            <LinearGradient
+              colors={['#6B4EFF', '#8A4FFF']}
+              style={styles.actionButtonGradient}
+            >
+              <MaterialCommunityIcons name="plus-circle" size={24} color="white" />
+              <Text style={styles.actionButtonText}>Add Today's Entry</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push('/all-entries')}
+          >
+            <View style={styles.secondaryActionButton}>
+              <MaterialCommunityIcons name="book-open" size={24} color="#6B4EFF" />
+              <Text style={styles.secondaryActionButtonText}>View All Entries</Text>
+            </View>
           </TouchableOpacity>
         </View>
+      </ScrollView>
 
-        <View style={styles.calendarContainer}>
-           <Calendar
-            onDayPress={handleDayPress}
-            style={styles.calendar}
-            markingType="custom"
-            markedDates={getMarkedDates()}
-            dayComponent={CustomDayWithMultiMoods}
-            theme={{
-              textDayFontFamily: 'System',
-              textMonthFontFamily: 'System',
-              textDayHeaderFontFamily: 'System',
-              textDayFontWeight: '400',
-              textMonthFontWeight: '600',
-              textDayHeaderFontWeight: '600',
-              textDayFontSize: 16,
-              textMonthFontSize: 18,
-              textDayHeaderFontSize: 14
-            }}
-          />
-
-          {/* Legend - Conditionally rendered */}
-          {!isHabitView && (
-            <View style={styles.legend}>
-              <Text style={styles.legendTitle}>Mood Legend</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.legendScrollViewContent}>
-                {Object.entries(MOODS).map(([key, mood]) => (
-                  <View key={key} style={styles.legendItem}>
-                    <MaterialCommunityIcons
-                      name={mood.icon}
-                      size={20}
-                      color={mood.color}
-                      style={styles.legendIcon}
-                    />
-                    <Text style={styles.legendText}>{mood.label}</Text>
-                  </View>
-                ))}
-              </ScrollView>
+      {/* FR-21 & FR-22: CRISIS MODE MODAL */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={panicModalVisible}
+        onRequestClose={() => setPanicModalVisible(false)}
+      >
+        <View style={localStyles.modalOverlay}>
+          <View style={localStyles.modalContent}>
+            <View style={localStyles.modalHeader}>
+              <MaterialCommunityIcons name="alert-circle" size={32} color="#FF4E4E" />
+              <Text style={localStyles.modalTitle}>Emergency Support</Text>
             </View>
-          )}
-        </View>
-      </View>
+            
+            <Text style={localStyles.modalSubtitle}>
+              You are not alone. Please choose an option below.
+            </Text>
 
-      {/* Quick Actions */}
-      <View style={styles.quickActions}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => router.push({
-            pathname: '/specific-day',
-            params: {
-              date: getTodayDate(),
-              initialTab: 'journal',
-              openForm: 'true'
-            }
-          })}
-        >
-          <LinearGradient
-            colors={['#6B4EFF', '#8A4FFF']}
-            style={styles.actionButtonGradient}
-          >
-            <MaterialCommunityIcons name="plus-circle" size={24} color="white" />
-            <Text style={styles.actionButtonText}>Add Today's Entry</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            {/* Safe Circle Button */}
+            <TouchableOpacity 
+              style={[localStyles.modalButton, localStyles.safeCircleButton]}
+              onPress={handleSafeCircleAlert}
+            >
+              <MaterialCommunityIcons name="message-alert" size={24} color="white" />
+              <View style={localStyles.buttonTextContainer}>
+                <Text style={localStyles.buttonTitle}>Alert Safe Circle</Text>
+                <Text style={localStyles.buttonDesc}>Send emergency SMS to contacts</Text>
+              </View>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => router.push('/all-entries')}
-        >
-          <View style={styles.secondaryActionButton}>
-            <MaterialCommunityIcons name="book-open" size={24} color="#6B4EFF" />
-            <Text style={styles.secondaryActionButtonText}>View All Entries</Text>
+            <View style={localStyles.divider} />
+            <Text style={localStyles.hotlineHeader}>Immediate Hotlines (Romania)</Text>
+
+            {/* Hotline Buttons */}
+            {EMERGENCY_NUMBERS.map((item, index) => (
+              <TouchableOpacity 
+                key={index}
+                style={localStyles.hotlineButton}
+                onPress={() => handleCall(item.number)}
+              >
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <View style={localStyles.iconCircle}>
+                    <MaterialCommunityIcons name={item.icon} size={20} color="#6B4EFF" />
+                  </View>
+                  <Text style={localStyles.hotlineName}>{item.name}</Text>
+                </View>
+                <Text style={localStyles.hotlineNumber}>{item.number}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity 
+              style={localStyles.closeModalButton}
+              onPress={() => setPanicModalVisible(false)}
+            >
+              <Text style={localStyles.closeModalText}>Close / I'm Safe</Text>
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 }
+
+// Local styles for the panic button features
+const localStyles = StyleSheet.create({
+  panicButtonContainer: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 100,
+  },
+  panicButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FF4E4E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#FF4E4E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  panicButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 14,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    minHeight: 500,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2D3748',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#718096',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  modalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  safeCircleButton: {
+    backgroundColor: '#6B4EFF',
+    shadowColor: '#6B4EFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  buttonTextContainer: {
+    marginLeft: 16,
+  },
+  buttonTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  buttonDesc: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 20,
+  },
+  hotlineHeader: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4A5568',
+    marginBottom: 12,
+  },
+  hotlineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F7FAFC',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E9D8FD',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  hotlineName: {
+    fontSize: 16,
+    color: '#2D3748',
+    fontWeight: '500',
+  },
+  hotlineNumber: {
+    fontSize: 16,
+    color: '#6B4EFF',
+    fontWeight: 'bold',
+  },
+  closeModalButton: {
+    marginTop: 20,
+    padding: 16,
+    alignItems: 'center',
+  },
+  closeModalText: {
+    fontSize: 16,
+    color: '#718096',
+    fontWeight: '600',
+  },
+});
