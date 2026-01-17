@@ -15,12 +15,13 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   getFirestore,
   collection,
-  getDocs,
   query,
   orderBy,
   where,
   updateDoc,
-  doc
+  doc,
+  deleteField,
+  onSnapshot // <--- 1. Import onSnapshot
 } from 'firebase/firestore';
 import CryptoJS from 'crypto-js';
 import { db } from '../../firebaseConfig';
@@ -30,73 +31,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { getEncryptionKey } from '../utils/encryption'; 
 
+// ... (Keep your MOODS constant exactly as it is) ...
 const MOODS = {
-  veryHappy: {
-    icon: 'emoticon-excited-outline',
-    label: 'Very Happy',
-    color: '#FFD93D',
-    gradient: ['#FFD93D', '#FFED4E']
-  },
-  happy: {
-    icon: 'emoticon-happy-outline',
-    label: 'Happy',
-    color: '#4CAF50',
-    gradient: ['#4CAF50', '#66BB6A']
-  },
-  content: {
-    icon: 'emoticon-outline',
-    label: 'Content',
-    color: '#7ED6DF',
-    gradient: ['#7ED6DF', '#81ECEC']
-  },
-  neutral: {
-    icon: 'emoticon-neutral-outline',
-    label: 'Meh',
-    color: '#92beb5',
-    gradient: ['#92beb5', '#A8C8C0']
-  },
-  anxious: {
-    icon: 'emoticon-frown-outline',
-    label: 'Anxious',
-    color: '#9b59b6',
-    gradient: ['#9b59b6', '#be90d4']
-  },
-  angry: {
-    icon: 'emoticon-angry-outline',
-    label: 'Angry',
-    color: '#e74c3c',
-    gradient: ['#e74c3c', '#f1948a']
-  },
-  sad: {
-    icon: 'emoticon-sad-outline',
-    label: 'Sad',
-    color: '#7286D3',
-    gradient: ['#7286D3', '#8FA4E8']
-  },
-  verySad: {
-    icon: 'emoticon-cry-outline',
-    label: 'Very Sad',
-    color: '#b44560',
-    gradient: ['#b44560', '#C85A75']
-  },
-  overwhelmed: {
-    icon: 'emoticon-confused-outline',
-    label: 'Overwhelmed',
-    color: '#ffa502',
-    gradient: ['#ffa502', '#ffb347']
-  },
-  tired: {
-    icon: 'emoticon-sick-outline',
-    label: 'Tired',
-    color: '#95a5a6',
-    gradient: ['#95a5a6', '#bdc3c7']
-  },
-  hopeful: {
-    icon: 'emoticon-wink-outline',
-    label: 'Hopeful',
-    color: '#00cec9',
-    gradient: ['#00cec9', '#81ecec']
-  }
+  veryHappy: { icon: 'emoticon-excited-outline', label: 'Very Happy', color: '#FFD93D', gradient: ['#FFD93D', '#FFED4E'] },
+  happy: { icon: 'emoticon-happy-outline', label: 'Happy', color: '#4CAF50', gradient: ['#4CAF50', '#66BB6A'] },
+  content: { icon: 'emoticon-outline', label: 'Content', color: '#7ED6DF', gradient: ['#7ED6DF', '#81ECEC'] },
+  neutral: { icon: 'emoticon-neutral-outline', label: 'Meh', color: '#92beb5', gradient: ['#92beb5', '#A8C8C0'] },
+  anxious: { icon: 'emoticon-frown-outline', label: 'Anxious', color: '#9b59b6', gradient: ['#9b59b6', '#be90d4'] },
+  angry: { icon: 'emoticon-angry-outline', label: 'Angry', color: '#e74c3c', gradient: ['#e74c3c', '#f1948a'] },
+  sad: { icon: 'emoticon-sad-outline', label: 'Sad', color: '#7286D3', gradient: ['#7286D3', '#8FA4E8'] },
+  verySad: { icon: 'emoticon-cry-outline', label: 'Very Sad', color: '#b44560', gradient: ['#b44560', '#C85A75'] },
+  overwhelmed: { icon: 'emoticon-confused-outline', label: 'Overwhelmed', color: '#ffa502', gradient: ['#ffa502', '#ffb347'] },
+  tired: { icon: 'emoticon-sick-outline', label: 'Tired', color: '#95a5a6', gradient: ['#95a5a6', '#bdc3c7'] },
+  hopeful: { icon: 'emoticon-wink-outline', label: 'Hopeful', color: '#00cec9', gradient: ['#00cec9', '#81ecec'] }
 };
 
 export default function AllEntries() {
@@ -108,6 +55,7 @@ export default function AllEntries() {
   const auth = getAuth();
   const user = auth.currentUser;
 
+  // 1. Load Encryption Key First
   useEffect(() => {
     (async () => {
       const key = await getEncryptionKey();
@@ -127,24 +75,23 @@ export default function AllEntries() {
     return null;
   };
 
-  const loadAllEntries = async () => {
-    if (!user || !encryptionKey) {
-      setLoading(false);
-      return;
-    }
+  // 2. REAL-TIME LISTENER (Replaces loadAllEntries)
+  useEffect(() => {
+    if (!user || !encryptionKey) return;
 
-    try {
-      setLoading(true);
-      const q = query(
-        collection(db, 'journal_entries'),
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc')
-      );
+    setLoading(true);
 
-      const querySnapshot = await getDocs(q);
+    const q = query(
+      collection(db, 'journal_entries'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    // This listener runs automatically whenever the DB changes
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const loadedEntries = [];
-
-      querySnapshot.forEach((doc) => {
+      
+      snapshot.docs.forEach((doc) => {
         const data = doc.data();
         const decryptedData = decryptData(data.encryptedContent);
 
@@ -153,48 +100,47 @@ export default function AllEntries() {
             id: doc.id,
             ...decryptedData,
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
-            // 1. CAPTURE SHARING STATUS (Default to false if missing)
             isShared: data.isShared || false 
           });
         }
       });
 
       setEntries(loadedEntries);
-    } catch (error) {
-      console.error('Error loading all entries:', error);
-      Alert.alert('Error', 'Failed to load journal entries.');
-    } finally {
       setLoading(false);
-    }
-  };
+    }, (error) => {
+      console.error("Listener error:", error);
+      setLoading(false);
+    });
 
-  useEffect(() => {
-    if (encryptionKey && user) {
-      loadAllEntries();
-    }
-  }, [encryptionKey, user]);
+    // Cleanup listener when leaving the screen
+    return () => unsubscribe();
+  }, [user, encryptionKey]); 
 
-  // 2. NEW FUNCTION: Toggle Sharing Status
-  const toggleShare = async (entryId, currentStatus) => {
+
+  const toggleShare = async (entry) => {
     try {
-      // A. Optimistic Update (Change UI immediately)
-      setEntries(prevEntries => 
-        prevEntries.map(entry => 
-          entry.id === entryId ? { ...entry, isShared: !currentStatus } : entry
-        )
-      );
-
-      // B. Update Firestore
-      const entryRef = doc(db, 'journal_entries', entryId);
-      await updateDoc(entryRef, {
-        isShared: !currentStatus
-      });
-
+      // Optimistic update isn't strictly needed with onSnapshot (it's fast), 
+      // but keeps UI snappy.
+      const entryRef = doc(db, 'journal_entries', entry.id);
+      
+      if (!entry.isShared) {
+        await updateDoc(entryRef, {
+          isShared: true,
+          sharedText: entry.text,
+          sharedMood: entry.mood,
+          sharedDate: entry.date || entry.createdAt
+        });
+      } else {
+        await updateDoc(entryRef, {
+          isShared: false,
+          sharedText: deleteField(), 
+          sharedMood: deleteField(),
+          sharedDate: deleteField()
+        });
+      }
     } catch (error) {
       console.error("Error toggling share:", error);
       Alert.alert("Error", "Could not update sharing status");
-      // Revert if failed
-      loadAllEntries(); 
     }
   };
 
@@ -239,9 +185,8 @@ export default function AllEntries() {
             </Text>
         </View>
 
-        {/* 3. NEW: Share Toggle Button */}
         <TouchableOpacity 
-            onPress={() => toggleShare(entry.id, entry.isShared)}
+            onPress={() => toggleShare(entry)}
             style={{ 
                 flexDirection: 'row', 
                 alignItems: 'center', 

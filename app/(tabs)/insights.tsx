@@ -284,19 +284,17 @@ useEffect(() => {
     return unsubscribe;
   }, []);
   const userId = user?.uid;
-  const decryptData = (encryptedData) => {
-  if (!encryptionKey) return null;
-
-  try {
-    const bytes = CryptoJS.AES.decrypt(encryptedData, encryptionKey);
-    const result = bytes.toString(CryptoJS.enc.Utf8);
-    console.log('Decrypted string:', result); // Add this
-    if (result) return JSON.parse(result);
-  } catch (e) {
-    console.log('Decryption error:', e);
-  } 
-  return null;
-};
+  const decryptData = useCallback((encryptedData) => {
+    if (!encryptionKey) return null;
+    try {
+      const bytes = CryptoJS.AES.decrypt(encryptedData, encryptionKey);
+      const result = bytes.toString(CryptoJS.enc.Utf8);
+      if (result) return JSON.parse(result);
+    } catch (e) {
+      console.log('Decryption error:', e);
+    } 
+    return null;
+  }, [encryptionKey]); // Re-create only when key changes
 
   useEffect(() => {
     getEncryptionKey()
@@ -410,15 +408,13 @@ useEffect(() => {
 
         if (decryptedData && typeof decryptedData === 'object') {
           let entryDate;
-          if (data.createdAt instanceof Timestamp) {
-            entryDate = data.createdAt.toDate();
-          } else if (data.createdAt && typeof data.createdAt === 'object' && 'seconds' in data.createdAt) {
-            entryDate = new Date(data.createdAt.seconds * 1000);
-          } else if (decryptedData.date) {
+          if (decryptedData.date) {
             entryDate = new Date(decryptedData.date);
+          } else if (data.createdAt instanceof Timestamp) {
+            // Fallback to createdAt only if internal date is missing
+            entryDate = data.createdAt.toDate();
           } else {
-            console.warn(`Entry ${doc.id} missing valid date in Firestore 'createdAt' and decrypted data. Skipping this entry.`);
-            return;
+            entryDate = new Date(); // Final fallback
           }
 
           const journalText = decryptedData.text || '';
@@ -464,7 +460,7 @@ useEffect(() => {
     // Return the unsubscribe function from the useCallback.
     // This will be used by the useEffect's cleanup.
     return unsubscribe;
-  }, [userId]); // Dependency: userId
+  }, [userId,encryptionKey]); // Dependency: userId
 useEffect(() => {
   // don’t start until we have both a logged-in user and the encryption key
   if (!userId || !isKeyLoaded) return;
